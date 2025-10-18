@@ -4,7 +4,7 @@ import base64
 import uuid
 import time
 import threading
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from dotenv import load_dotenv
 import requests
 from github import Github, GithubException
@@ -38,7 +38,6 @@ class DeploymentManager:
     def get_repo(self, repo_url):
         """Get repository from URL"""
         try:
-            # Extract repo name from URL
             repo_name = repo_url.split('/')[-1]
             return self.user.get_repo(repo_name)
         except:
@@ -60,11 +59,9 @@ class DeploymentManager:
     
     def commit_files(self, repo, files, commit_message="Initial commit"):
         try:
-            # Start with LICENSE
             license_content = self.get_license_content()
             repo.create_file("LICENSE", f"{commit_message} - Add LICENSE", license_content)
             
-            # Add other files
             for file_path, content in files.items():
                 repo.create_file(file_path, commit_message, content)
             
@@ -74,16 +71,12 @@ class DeploymentManager:
             return None
     
     def update_repo(self, repo, files, commit_message="Update for round 2"):
-        """Update existing repository with new files"""
         try:
             for file_path, content in files.items():
                 try:
-                    # Try to get file to see if it exists
                     file_contents = repo.get_contents(file_path)
-                    # Update existing file
                     repo.update_file(file_path, commit_message, content, file_contents.sha)
                 except:
-                    # Create new file
                     repo.create_file(file_path, commit_message, content)
             
             return repo.get_branch("main").commit.sha
@@ -141,7 +134,6 @@ def process_attachments(attachments):
     return processed
 
 def notify_evaluation_with_retry(evaluation_url, data, max_retries=5):
-    """Notify evaluation URL with exponential backoff as required"""
     for attempt in range(max_retries):
         try:
             response = requests.post(
@@ -157,7 +149,7 @@ def notify_evaluation_with_retry(evaluation_url, data, max_retries=5):
             print(f"Attempt {attempt + 1} failed: {e}")
         
         if attempt < max_retries - 1:
-            wait_time = 2 ** attempt  # 1, 2, 4, 8 seconds - exponential backoff
+            wait_time = 2 ** attempt
             print(f"Waiting {wait_time}s before retry...")
             time.sleep(wait_time)
     
@@ -165,26 +157,18 @@ def notify_evaluation_with_retry(evaluation_url, data, max_retries=5):
     return False
 
 def process_round1_deployment(request_data):
-    """Process Round 1 deployment - Create new repository"""
     try:
-        # Verify secret
         if not deployment_manager.verify_secret(request_data.get('secret')):
             return None, "Invalid secret"
         
-        # Get generator
         generator = get_generator(request_data['brief'])
-        
-        # Process attachments
         attachments = process_attachments(request_data.get('attachments', []))
-        
-        # Generate files for round 1
         files = generator.generate_round1(
             request_data['brief'], 
             request_data.get('checks', []),
             attachments
         )
         
-        # Create repo
         repo, repo_name = deployment_manager.create_repo(
             request_data['task'], 
             request_data['brief']
@@ -193,20 +177,16 @@ def process_round1_deployment(request_data):
         if not repo:
             return None, "Failed to create repository"
         
-        # Commit files
         commit_sha = deployment_manager.commit_files(repo, files, "Initial commit - Round 1")
         
         if not commit_sha:
             return None, "Failed to commit files"
         
-        # Build evaluation data EXACTLY as required
         evaluation_data = {
-            # Copy from request as required
             "email": request_data['email'],
             "task": request_data['task'],
             "round": request_data['round'],
             "nonce": request_data['nonce'],
-            # Repository details
             "repo_url": f"https://github.com/{deployment_manager.user.login}/{repo_name}",
             "commit_sha": commit_sha,
             "pages_url": f"https://{deployment_manager.user.login}.github.io/{repo_name}/"
@@ -218,31 +198,19 @@ def process_round1_deployment(request_data):
         return None, f"Deployment failed: {str(e)}"
 
 def process_round2_deployment(request_data):
-    """Process Round 2 deployment - Update existing repository"""
     try:
-        # Verify secret
         if not deployment_manager.verify_secret(request_data.get('secret')):
             return None, "Invalid secret"
         
-        # Get the original repo (from previous round)
-        # In a real scenario, you'd track this, but for now we'll extract from brief
-        # or use a different approach based on task ID
-        
-        # For simplicity, we'll create a new repo for round 2 as well
-        # In production, you'd look up the existing repo from your database
-        
         generator = get_generator(request_data['brief'])
         attachments = process_attachments(request_data.get('attachments', []))
-        
-        # Generate files for round 2
         files = generator.generate_round2(
             request_data['brief'], 
             request_data.get('checks', []),
             attachments,
-            {}  # Existing files would be passed here
+            {}
         )
         
-        # Create new repo for round 2 (in real scenario, update existing)
         repo, repo_name = deployment_manager.create_repo(
             f"{request_data['task']}-round2", 
             request_data['brief']
@@ -251,17 +219,15 @@ def process_round2_deployment(request_data):
         if not repo:
             return None, "Failed to create repository for round 2"
         
-        # Commit files
         commit_sha = deployment_manager.commit_files(repo, files, "Round 2 updates")
         
         if not commit_sha:
             return None, "Failed to commit files for round 2"
         
-        # Build evaluation data for round 2
         evaluation_data = {
             "email": request_data['email'],
             "task": request_data['task'],
-            "round": request_data['round'],  # This will be 2
+            "round": request_data['round'],
             "nonce": request_data['nonce'],
             "repo_url": f"https://github.com/{deployment_manager.user.login}/{repo_name}",
             "commit_sha": commit_sha,
@@ -274,7 +240,6 @@ def process_round2_deployment(request_data):
         return None, f"Round 2 deployment failed: {str(e)}"
 
 def process_deployment_async(request_data):
-    """Process deployment in background thread"""
     try:
         round_num = request_data.get('round', 1)
         
@@ -287,7 +252,6 @@ def process_deployment_async(request_data):
             return
         
         if evaluation_data:
-            # Notify evaluation URL with retry mechanism
             success = notify_evaluation_with_retry(
                 request_data['evaluation_url'], 
                 evaluation_data
@@ -306,39 +270,25 @@ def process_deployment_async(request_data):
 
 @app.route('/api/deploy', methods=['POST'])
 def deploy():
-    """Main deployment endpoint - Handles both Round 1 and Round 2"""
     try:
         request_data = request.get_json()
         
         if not request_data:
-            return jsonify({
-                "status": "error",
-                "message": "No JSON data received"
-            }), 400
+            return jsonify({"status": "error", "message": "No JSON data received"}), 400
         
-        # Validate required fields
         required_fields = ['email', 'secret', 'task', 'round', 'nonce', 'brief', 'evaluation_url']
-        missing_fields = [field for field in required_fields if field not in request_data]
+        missing_fields = [f for f in required_fields if f not in request_data]
         
         if missing_fields:
-            return jsonify({
-                "status": "error",
-                "message": f"Missing required fields: {missing_fields}"
-            }), 400
+            return jsonify({"status": "error", "message": f"Missing fields: {missing_fields}"}), 400
         
-        # Verify secret immediately
         if not deployment_manager.verify_secret(request_data.get('secret')):
-            return jsonify({
-                "status": "error",
-                "message": "Invalid secret"
-            }), 401
+            return jsonify({"status": "error", "message": "Invalid secret"}), 401
         
-        # Start async processing
         thread = threading.Thread(target=process_deployment_async, args=(request_data,))
         thread.daemon = True
         thread.start()
         
-        # Return immediate response as required
         round_num = request_data.get('round', 1)
         return jsonify({
             "status": "accepted",
@@ -348,10 +298,7 @@ def deploy():
         }), 200
         
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -361,6 +308,19 @@ def health():
         "version": "4.0",
         "features": ["round1", "round2", "github_pages", "evaluation_notification"]
     }), 200
+
+
+# 🧩 NEW: Homepage route
+@app.route('/')
+def serve_index():
+    """Serve index.html if it exists"""
+    if os.path.exists("index.html"):
+        return send_from_directory('.', 'index.html')
+    elif os.path.exists("templates/index.html"):
+        return send_from_directory('templates', 'index.html')
+    else:
+        return "<h1>🚀 LLM Deployment API is live!</h1><p>No index.html found yet.</p>"
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
