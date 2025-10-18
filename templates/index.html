@@ -41,15 +41,17 @@
         try {
             const response = await fetch('data.csv');
             const csvText = await response.text();
-            const lines = csvText.trim().split('\\n').slice(1);
-            
+            const lines = csvText.trim().split('\n').slice(1);
+
             let total = 0;
             const tableBody = document.getElementById('product-sales-body');
             tableBody.innerHTML = '';
 
             lines.forEach(line => {
                 if (line.trim()) {
-                    const [product, salesStr] = line.split(',');
+                    // Split by comma or tab
+                    const parts = line.includes(',') ? line.split(',') : line.split('\t');
+                    const [product, salesStr] = parts.map(s => s.trim());
                     const sales = parseFloat(salesStr);
                     if (!isNaN(sales)) {
                         total += sales;
