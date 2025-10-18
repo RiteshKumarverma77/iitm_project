@@ -21,7 +21,6 @@ try:
 except ImportError as e:
     print(f"Import error: {e}")
     from generators.base_generator import BaseGenerator
-    # Fallback generators...
 
 app = Flask(__name__)
 
@@ -36,7 +35,6 @@ class DeploymentManager:
         return request_secret == self.secret
     
     def get_repo(self, repo_url):
-        """Get repository from URL"""
         try:
             repo_name = repo_url.split('/')[-1]
             return self.user.get_repo(repo_name)
@@ -280,50 +278,4 @@ def deploy():
         missing_fields = [f for f in required_fields if f not in request_data]
         
         if missing_fields:
-            return jsonify({"status": "error", "message": f"Missing fields: {missing_fields}"}), 400
-        
-        if not deployment_manager.verify_secret(request_data.get('secret')):
-            return jsonify({"status": "error", "message": "Invalid secret"}), 401
-        
-        thread = threading.Thread(target=process_deployment_async, args=(request_data,))
-        thread.daemon = True
-        thread.start()
-        
-        round_num = request_data.get('round', 1)
-        return jsonify({
-            "status": "accepted",
-            "message": f"Round {round_num} deployment process started",
-            "round": round_num,
-            "task": request_data['task']
-        }), 200
-        
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({
-        "status": "healthy", 
-        "service": "LLM Deployment API",
-        "version": "4.0",
-        "features": ["round1", "round2", "github_pages", "evaluation_notification"]
-    }), 200
-
-
-# 🧩 NEW: Homepage route
-@app.route('/')
-def serve_index():
-    """Serve index.html if it exists"""
-    if os.path.exists("index.html"):
-        return send_from_directory('.', 'index.html')
-    elif os.path.exists("templates/index.html"):
-        return send_from_directory('templates', 'index.html')
-    else:
-        return "<h1>🚀 LLM Deployment API is live!</h1><p>No index.html found yet.</p>"
-
-
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 10000))
-    print(f"🚀 LLM Deployment API v4.0 - Round 1 & 2 Support")
-    print(f"🔗 Starting on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
+            return jsonify({"status": "error", "message": f"Missing fields: {missing_fields
